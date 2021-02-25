@@ -1,0 +1,81 @@
+Sub ReadSDIO()
+    'This macro read several IAS-dta files and can compare variable between them
+    'Geometry of part is described in 1 dta file (ai: aft intercostal and so on)
+    'dta file consists of 3 blocks: Head, Vars and Fields
+    '1. read fields_block and get variables and bytes_in_fields_block to begin from to read
+    '2. read vars_block from bytes number to other variables
+    
+    Dim file_path As String:  file_path = ThisWorkbook.Path + "\p9_"
+    'first fill in dta-sheet and then summary
+    Dim sh_sum As Worksheet: Set sh_sum = ActiveWorkbook.Worksheets("summary")
+    sh_sum.Range("B1:XZ1000").ClearContents
+    Dim sh_dta As Worksheet: Set sh_dta = ActiveWorkbook.Worksheets("dta")
+    
+    Dim all_file As String
+    Dim column As Integer: Dim columns As Integer:
+    Dim row As Integer: Dim rows As Integer: Dim var_block_row As Integer
+    Dim bytes_in_lines As Long: Dim bytes_from_fields_block As Long
+    Dim line_from_dta As Long:
+    
+    Dim next_elem_shift As Long: next_elem_shift = 0
+    Dim startTime As Date, endTime As Date: startTime = Timer
+    
+    Application.Calculation = xlCalculationManual
+    parts = Array("af", "ai")
+    For Each part In parts
+        sh_dta.Cells.Clear 'clear data before each part
+        bytes_in_lines = 0: line_from_dta = 0
+        
+        all_file = read_txt(file_path + part + "_cut.dta")
+        ar_all = Split(all_file, vbLf)
+        
+        fields_block = return_between(all_file, "<BEG-FLDS>", 1, "<END-FLDS>")
+        ar_fields = Split(fields_block, vbLf) 'A|v|-|177|0|0|0|d|-|, ..
+        
+        columns = UBound(ar_fields) - 1
+        ' === 1. parse every var in fields_block to column in dta sheet  ===
+        For column = 0 To columns
+            ch = Split(ar_fields(column), "|") 'parse string var to char: A, v, -. 177, ..
+             ' === 2. parse var to every char to row  ===
+             rows = UBound(ch) - 1
+             For row = 0 To rows
+                 sh_dta.Cells(row + 1, column + 2) = ch(row)
+             Next row
+            ' === 3. parse vars_block from bytes_in_fields_block  ===
+            var_block_row = 10: bytes_from_fields_block = ch(3)
+            Do While bytes_in_lines < bytes_from_fields_block
+                sh_dta.Cells(var_block_row, column + 1) = ar_all(line_from_dta)
+                bytes_in_lines = bytes_in_lines + Len(ar_all(line_from_dta)) + 1
+                line_from_dta = line_from_dta + 1
+                var_block_row = var_block_row + 1
+            Loop
+        Next column
+        
+        ' === 4.fill summary sheet ===
+        row_dta = 1: col_dta = 2: row_sum = 1: col_sum = 2
+        For col_dta = 2 To columns
+            ' === summary: read just array with Real type ===
+            If sh_dta.Cells(2, col_dta) = "v" Then
+            If sh_dta.Cells(8, col_dta) = "d" Then
+                sh_sum.Cells(1 + next_elem_shift, col_sum) = sh_dta.Cells(1, col_dta) 'var name
+                i_val = sh_dta.Cells(14, col_dta)
+                j_val = sh_dta.Cells(15, col_dta)
+                offset = sh_dta.Cells(19, col_dta)
+                For row_sum = 1 To i_val
+                    If j_val < 2 Then
+                        sh_sum.Cells(row_sum + 1 + next_elem_shift, col_sum) = _
+                        sh_dta.Cells(row_sum + offset + 19, col_dta)
+                    Else
+                        sh_sum.Cells(row_sum + 1 + next_elem_shift, col_sum) = _
+                        sh_dta.Cells(offset + 20 + (row_sum - 1) * j_val, col_dta)
+                    End If
+                Next row_sum
+                col_sum = col_sum + 1
+            End If: End If
+        Next col_dta
+        next_elem_shift = sh_sum.Range("B1").End(xlDown).row
+    Next
+    endTime = Timer
+    Application.Calculation = xlCalculationAutomatic
+    MsgBox "Completed within " & Format(endTime - startTime, "0.0") & " sec."
+End Sub
